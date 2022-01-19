@@ -1,5 +1,5 @@
 {% comment %}
-  Uncomment the following if you're getting an error "Shopify.CountryProvinceSelector" is not a constructor. Some themes (Dawn) include this already.
+  Uncomment the following if you're getting an error "Shopify.CountryProvinceSelector is not found" in the console
   {{ "shopify_common.js" | shopify_asset_url | script_tag }}
 {% endcomment %}
 
@@ -122,12 +122,15 @@
         new Shopify.CountryProvinceSelector(`${selectors.countryInput}_${formId}`, `${selectors.provinceInput}_${formId}`, {
           hideElement: `${selectors.provinceContainer}_${formId}`
         });
+      } else {
+        console.error("Shopify.CountryProvinceSelector is not found");
+        return;
       }
 
       submit.addEventListener('click', () => {
         resultContainer.innerHTML = '',
         submit.disabled = true,
-        submit.innerHTML = `<svg class="plus-shipping-calculator__spinner" data-plus-toggle data-plus-hidden viewBox="0 0 50 50" data-visible='false'><circle class="path" cx="25" cy="25" r="20" fill="none" stroke-width="5"></circle></svg>`;
+        submit.innerHTML = `<svg class="plus-shipping-calculator__spinner" viewBox="0 0 50 50"><circle class="path" cx="25" cy="25" r="20" fill="none" stroke-width="5"></circle></svg>`;
         const formData = {
           'shipping_address[country]': countryInput.value,
           'shipping_address[province]' : provinceInput.value,
@@ -227,13 +230,13 @@
           break;
       }
       return formatString.replace(placeholderRegex, value);
-    },
+    }
 
     init = () => {
       if (!settings.enabled) { return; }
       const shippingCalculators = document.getElementsByClassName(selectors.shippingCalculator);
       Array.from(shippingCalculators).forEach((calculator) => initCalc(calculator));
-    };
+    }
       
     return init;
   })();
