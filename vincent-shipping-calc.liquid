@@ -1,0 +1,257 @@
+{%- style -%}
+  .plus-shipping-calculator {
+    align-items: center;
+    display: none;
+    flex-direction: column;
+  }
+
+  .plus-shipping-calculator[data-initialized] {
+    display: flex;
+  }
+
+  .plus-shipping-calculator > .button {
+    margin-top: 1em;
+    width: 200px;
+  }
+
+  .plus-shipping-calculator__results {
+    text-align: center;
+  }
+
+  .plus-shipping-calculator__results > ul > li {
+    list-style: none;
+  }
+
+  .plus-shipping-calculator__spinner {
+    animation: rotate 2s linear infinite;
+    margin: 0.2em 0.5em;
+    height: 22px;
+    width: 22px;
+    vertical-align: text-bottom;
+  }
+
+  .plus-shipping-calculator__spinner > .path {
+    animation: dash 1.5s ease-in-out infinite;
+    stroke-linecap: round;
+  }
+
+  @keyframes rotate {
+    100% {
+      transform: rotate(360deg);
+    }
+  }
+
+  @keyframes dash {
+    0% {
+      stroke-dasharray: 1, 150;
+      stroke-dashoffset: 0;
+    }
+    50% {
+      stroke-dasharray: 90, 150;
+      stroke-dashoffset: -35;
+    }
+    100% {
+      stroke-dasharray: 90, 150;
+      stroke-dashoffset: -124;
+    }
+  }
+{%- endstyle -%}
+
+<div class="plus-shipping-calculator" data-form-id="1">
+  <h5>Calculate shipping rates</h5>
+  <label for="ShippingCountry_1">
+    Country
+    <select id="ShippingCountry_1">{{ all_country_option_tags }}</select>
+  </label>
+  <div id="ShippingProvinceContainer_1">
+    <label>
+      State/Province
+      <select id="ShippingProvince_1"></select>
+    </label>
+  </div>
+  <label>
+    Zip code
+    <input type="text" name="zipcode"/>
+  </label>
+  <button class="button" type="submit">Check Rates</button>
+
+  <div class="plus-shipping-calculator__results"></div>
+</div>
+
+<script>
+  window.Plus = window.Plus || {};
+  Plus.shippingCalc = (function() {
+    const selectors = {
+      countryInput: 'ShippingCountry',
+      provinceContainer: 'ShippingProvinceContainer',
+      provinceInput: 'ShippingProvince',
+      resultsContainer: '.plus-shipping-calculator__results',
+      shippingCalculator: 'plus-shipping-calculator',
+      submit: '[type="submit"]',
+      zipCodeInput: '[name="zipcode"]'
+    },
+
+    language = {
+      free: 'Free',
+      error: 'Cannot retrieve rates, proceed to checkout to see rates',
+      noRates: 'No rates available',
+      submit: 'Check Rates',
+      zipCodeError: 'Enter a postcode'
+    },
+
+    settings = {
+      enabled: {{ section.settings.shipping_calculator_enable }},
+      geoIP: {{ section.settings.shipping_calculator_geo_country }},
+      moneyFormat: {{ shop.money_format | json }}
+    },
+
+    initCalc = (calculator) => {
+      const formId = calculator.dataset.formId,
+      countryInput = document.getElementById(`${selectors.countryInput}_${formId}`)
+      provinceInput = document.getElementById(`${selectors.provinceInput}_${formId}`),
+      resultContainer = calculator.querySelector(selectors.resultsContainer),
+      submit = calculator.querySelector(selectors.submit),
+      zipCodeInput = calculator.querySelector(selectors.zipCodeInput);
+
+      if (Shopify && Shopify.CountryProvinceSelector) {
+        new Shopify.CountryProvinceSelector(`${selectors.countryInput}_${formId}`, `${selectors.provinceInput}_${formId}`, {
+          hideElement: `${selectors.provinceContainer}_${formId}`
+        });
+      }
+
+      submit.addEventListener('click', () => {
+        resultContainer.innerHTML = '',
+        submit.disabled = true,
+        submit.innerHTML = `<svg class="plus-shipping-calculator__spinner" data-plus-toggle data-plus-hidden viewBox="0 0 50 50" data-visible='false'><circle class="path" cx="25" cy="25" r="20" fill="none" stroke-width="5"></circle></svg>`;
+        const formData = {
+          'shipping_address[country]': countryInput.value,
+          'shipping_address[province]' : provinceInput.value,
+          'shipping_address[zip]': zipCodeInput.value
+        };
+        fetch('/cart/prepare_shipping_rates.json?' + new URLSearchParams(formData), { method: 'POST' })
+        .then(response => {
+          if (!response.ok) { throw Error(response.statusText); }
+        })
+        .then(() => fetchRates(resultContainer, formData))
+        .catch((error) => { 
+          console.error('Error:', error);
+          resultContainer.textContent = zipCodeInput.value === '' ? language.zipCodeError : language.error;
+        })
+        .finally(() => {
+          submit.textContent = language.submit;
+          submit.disabled = false;
+        })
+      })
+
+      if (settings.geoIP) {
+        fetchCountry().then(country => {
+          if (country != null) {
+            countryInput.value = country,
+            countryInput.dispatchEvent(new Event('change'));
+          }
+        });
+      }
+
+      calculator.dataset.initialized = true;
+    },
+
+    fetchRates = async(resultContainer, formData) => {
+      const fragment = document.createDocumentFragment(),
+      response = await fetch ('/cart/async_shipping_rates.json?' + new URLSearchParams(formData))
+      .then(response => response.json());
+
+      if (response['shipping_rates'].length === 0) {
+        fragment.appendChild(document.createTextNode(language.noRates));
+      } else {
+        const list = document.createElement('ul');
+        for (const [key, value] of Object.entries(response['shipping_rates'])) {
+          const listItem = document.createElement('li'),
+          price = parseFloat(value.price) === 0 ? language.free : formatMoney(value.price, settings.moneyFormat);
+          listItem.textContent = `${value.name} (${price})`;
+          list.appendChild(listItem);
+        }
+        fragment.appendChild(list);
+      }
+      resultContainer.innerHTML = '',
+      resultContainer.appendChild(fragment);
+    },
+
+    fetchCountry = async() => {
+      return await fetch ('/browsing_context_suggestions')
+      .then(response => response.json())
+      .then(response => {
+        return (!!response['detected_values'] && response['detected_values'].country_name != null)
+          ? response['detected_values'].country_name
+          : null;
+      })
+    },
+
+    formatMoney = (cents, formatString) => {
+      if (typeof cents == 'string') { cents = cents.replace('.',''); }
+      let value = '';
+      const placeholderRegex = /\{\{\s*(\w+)\s*\}\}/,
+
+      defaultOption = (opt, def) => {
+        return (typeof opt == 'undefined' ? def : opt);
+      },
+
+      formatWithDelimiters = (number, precision, thousands, decimal) => {
+        precision = defaultOption(precision, 2);
+        thousands = defaultOption(thousands, ',');
+        decimal   = defaultOption(decimal, '.');
+        if (isNaN(number) || number == null) { return 0; }
+        number = (number/100.0).toFixed(precision);
+        const parts   = number.split('.'),
+        dollars = parts[0].replace(/(\d)(?=(\d\d\d)+(?!\d))/g, '$1' + thousands),
+        cents   = parts[1] ? (decimal + parts[1]) : '';
+        return dollars + cents;
+      };
+
+      switch(formatString.match(placeholderRegex)[1]) {
+        case 'amount':
+          value = formatWithDelimiters(cents, 2);
+          break;
+        case 'amount_no_decimals':
+          value = formatWithDelimiters(cents, 0);
+          break;
+        case 'amount_with_comma_separator':
+          value = formatWithDelimiters(cents, 2, '.', ',');
+          break;
+        case 'amount_no_decimals_with_comma_separator':
+          value = formatWithDelimiters(cents, 0, '.', ',');
+          break;
+      }
+      return formatString.replace(placeholderRegex, value);
+    }
+
+    init = () => {
+      if (!settings.enabled) { return; }
+      const shippingCalculators = document.getElementsByClassName(selectors.shippingCalculator);
+      Array.from(shippingCalculators).forEach((calculator) => initCalc(calculator));
+    }
+      
+    return init;
+  })();
+
+  window.addEventListener('DOMContentLoaded', () => Plus.shippingCalc());
+</script>
+
+{% schema %}
+{
+  "name": "Shipping calculator",
+  "settings": [
+    {
+      "type": "checkbox",
+      "id": "shipping_calculator_enable",
+      "label": "Enable calculator",
+      "default": true
+    },
+    {
+      "type": "checkbox",
+      "id": "shipping_calculator_geo_country",
+      "label": "Pre-select a country based on Geo IP",
+      "default": true
+    }
+  ]
+}
+{% endschema %}
