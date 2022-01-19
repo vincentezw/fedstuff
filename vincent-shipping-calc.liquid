@@ -227,13 +227,13 @@
           break;
       }
       return formatString.replace(placeholderRegex, value);
-    }
+    },
 
     init = () => {
       if (!settings.enabled) { return; }
       const shippingCalculators = document.getElementsByClassName(selectors.shippingCalculator);
       Array.from(shippingCalculators).forEach((calculator) => initCalc(calculator));
-    }
+    };
       
     return init;
   })();
